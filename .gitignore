@@ -43,6 +43,9 @@ MANIFEST
 .history
 /venv
 .venv/
+/front/node_modules/
+/front/build/
+/.runtime-logs/
 
 # Input and Output
 /input/
