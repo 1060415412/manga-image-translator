@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
 from manga_translator import Config
+from manga_translator.config import Inpainter
+from manga_translator.inpainting import get_inpainter
 from server.myqueue import task_queue, wait_in_queue, QueueElement, BatchQueueElement
 from server.streaming import notify, stream
 
@@ -50,7 +52,24 @@ async def to_pil_image(image: Union[str, bytes]) -> Image.Image:
         raise HTTPException(status_code=422, detail=str(e))
 
 
+def validate_inpainter(config: Config) -> None:
+    key = config.inpainter.inpainter
+    if key in (Inpainter.none, Inpainter.original):
+        return
+    try:
+        model = get_inpainter(key)
+        if model.is_downloaded():
+            return
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"擦除器 {key.value} 不可用：{exc}") from exc
+    raise HTTPException(
+        status_code=409,
+        detail=f"擦除器 {key.value} 的模型尚未下载。请在网页中切换为“不擦除”或先完成模型下载。",
+    )
+
+
 async def get_ctx(req: Request, config: Config, image: str|bytes):
+    validate_inpainter(config)
     image = await to_pil_image(image)
 
     task = QueueElement(req, image, config, 0)
@@ -59,6 +78,7 @@ async def get_ctx(req: Request, config: Config, image: str|bytes):
     return await wait_in_queue(task, None)
 
 async def while_streaming(req: Request, transform, config: Config, image: bytes | str):
+    validate_inpainter(config)
     image = await to_pil_image(image)
 
     task = QueueElement(req, image, config, 0)
@@ -74,6 +94,7 @@ async def while_streaming(req: Request, transform, config: Config, image: bytes 
 
 async def get_batch_ctx(req: Request, config: Config, images: list[str|bytes], batch_size: int = 4):
     """Process batch translation request"""
+    validate_inpainter(config)
     # Convert images to PIL Image objects
     pil_images = []
     for img in images:
