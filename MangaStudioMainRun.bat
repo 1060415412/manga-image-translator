@@ -7,6 +7,10 @@ REM =================================================================
 
 REM Set the working directory to this script's location.
 cd /d "%~dp0"
+set "MANGA_TRANSLATOR_VENV=C:\manga-image-translator-deps\venv"
+set "MANGA_TRANSLATOR_MODEL_DIR=C:\manga-image-translator-deps\models"
+set "MANGA_TRANSLATOR_PYTHON=%MANGA_TRANSLATOR_VENV%\Scripts\python.exe"
+set "MANGA_TRANSLATOR_PYTHONW=%MANGA_TRANSLATOR_VENV%\Scripts\pythonw.exe"
 
 :MENU
 cls
@@ -34,13 +38,13 @@ IF ERRORLEVEL 1 GOTO NORMAL_MODE
 
 :NORMAL_MODE
 echo [INFO] Launching in Normal (Silent) Mode...
-start "" ".\venv\Scripts\pythonw.exe" MangaStudioMain.py
+start "" "%MANGA_TRANSLATOR_PYTHONW%" MangaStudioMain.py
 GOTO END
 
 :DEBUG_MODE
 echo [INFO] Launching in Debug (Console) Mode...
 echo -----------------------------------------------------------------
-.\venv\Scripts\python.exe MangaStudioMain.py
+"%MANGA_TRANSLATOR_PYTHON%" MangaStudioMain.py
 echo -----------------------------------------------------------------
 echo [DEBUG] Script has finished or was stopped.
 pause
