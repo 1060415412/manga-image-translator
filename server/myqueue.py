@@ -136,10 +136,13 @@ async def wait_in_queue(task: QueueElement | BatchQueueElement, notify: NotifyTy
                 await executor_instances.free_executor(instance)
 
                 # 如果是连接错误，发送友好的错误消息
-                if "Cannot connect to host" in str(e) or "Connection refused" in str(e):
+                error_text = str(e)
+                if "huggingface.co" in error_text.lower():
+                    error_msg = "擦除模型下载失败，请切换为“不擦除”或检查 Hugging Face 网络连接。"
+                elif "Cannot connect to host" in error_text or "Connection refused" in error_text:
                     error_msg = "Translation service is starting up, please wait a moment and try again."
                 else:
-                    error_msg = f"Translation failed: {str(e)}"
+                    error_msg = f"Translation failed: {error_text}"
 
                 if notify:
                     notify(2, error_msg.encode('utf-8'))

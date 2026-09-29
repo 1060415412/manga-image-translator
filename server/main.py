@@ -18,6 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from manga_translator import Config
+from manga_translator.config import Inpainter
+from manga_translator.inpainting import get_inpainter
 from server.instance import ExecutorInstance, executor_instances
 from server.myqueue import task_queue
 from server.request_extraction import get_ctx, while_streaming, TranslateRequest, BatchTranslateRequest, get_batch_ctx
@@ -47,6 +49,7 @@ async def register_instance(instance: ExecutorInstance, req: Request, req_nonce:
     if req_nonce != nonce:
         raise HTTPException(401, detail="Invalid nonce")
     instance.ip = req.client.host
+    instance.nonce = nonce
     executor_instances.register(instance)
 
 def transform_to_image(ctx):
@@ -163,6 +166,36 @@ async def queue_size() -> int:
     return len(task_queue.queue)
 
 
+@app.get("/models/inpainters", tags=["api", "models"])
+async def inpainter_status() -> dict[str, dict[str, bool | str]]:
+    labels = {
+        Inpainter.default: "默认修复",
+        Inpainter.lama_large: "Lama Large",
+        Inpainter.lama_mpe: "Lama MPE",
+        Inpainter.sd: "Stable Diffusion",
+        Inpainter.none: "不擦除",
+        Inpainter.original: "保留原图",
+    }
+    statuses: dict[str, dict[str, bool | str]] = {}
+    for key, label in labels.items():
+        requires_model = key not in (Inpainter.none, Inpainter.original)
+        available = True
+        error = ""
+        if requires_model:
+            try:
+                available = get_inpainter(key).is_downloaded()
+            except Exception as exc:
+                available = False
+                error = str(exc)
+        statuses[key.value] = {
+            "available": available,
+            "requires_model": requires_model,
+            "label": label,
+            **({"error": error} if error else {}),
+        }
+    return statuses
+
+
 @app.api_route("/result/{folder_name}/final.png", methods=["GET", "HEAD"], tags=["api", "file"])
 async def get_result_by_folder(folder_name: str):
     """根据文件夹名称获取翻译结果图片"""
@@ -267,7 +300,7 @@ def start_translator_client_proc(host: str, port: int, nonce: str, params: Names
     base_path = os.path.dirname(os.path.abspath(__file__))
     parent = os.path.dirname(base_path)
     proc = subprocess.Popen(cmds, cwd=parent)
-    executor_instances.register(ExecutorInstance(ip=host, port=port))
+    executor_instances.register(ExecutorInstance(ip=host, port=port, nonce=nonce))
 
     def handle_exit_signals(signal, frame):
         proc.terminate()

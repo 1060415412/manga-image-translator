@@ -48,7 +48,9 @@ pyhyphen
 langcodes[data]
 manga-ocr
 langdetect
-pydensecrf@https://github.com/lucasb-eyer/pydensecrf/archive/refs/heads/master.zip
+# pydensecrf requires a local C++ toolchain on Windows. The runtime falls
+# back to the detector mask there, while Linux environments retain CRF refinement.
+pydensecrf @ https://github.com/lucasb-eyer/pydensecrf/archive/refs/heads/master.zip ; platform_system != 'Windows'
 accelerate
 bitsandbytes
 uvicorn

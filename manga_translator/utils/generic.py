@@ -23,6 +23,7 @@ except AttributeError: # Supports Python versions below 3.8
 
 MODULE_PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 BASE_PATH = os.path.dirname(MODULE_PATH)
+MODEL_PATH = os.path.abspath(os.environ.get('MANGA_TRANSLATOR_MODEL_DIR', os.path.join(BASE_PATH, 'models')))
 
 # Adapted from argparse.Namespace
 class Context(dict):

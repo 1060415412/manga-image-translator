@@ -11,6 +11,7 @@ from functools import cached_property
 
 from .generic import (
     BASE_PATH,
+    MODEL_PATH,
     download_url_with_progressbar,
     prompt_yes_no,
     replace_prefix,
@@ -91,7 +92,7 @@ class ModelWrapper(ABC):
 
         executables         - List of files that need to have the executable flag set
     """
-    _MODEL_DIR = os.path.join(BASE_PATH, 'models')
+    _MODEL_DIR = MODEL_PATH
     _MODEL_SUB_DIR = ''
     _MODEL_MAPPING = {}
     _KEY = ''

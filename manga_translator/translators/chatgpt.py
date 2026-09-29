@@ -1,4 +1,5 @@
 import re
+import json
 import os
 import asyncio
 import time
@@ -141,10 +142,72 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
             prompt = ""
             if self.include_template:
                 prompt = self.prompt_template.format(to_lang=lang_name)
-            # 加上分行内容
-            for i, query in enumerate(this_batch):
-                prompt += f"\n<|{i+1}|>{query}"
+            if self.json_mode:
+                # Keep the LLM contract independent from the renderer's legacy
+                # marker format. The renderer still receives a plain text list.
+                payload = [
+                    {"id": i + 1, "speaker": "unknown", "text": query}
+                    for i, query in enumerate(this_batch)
+                ]
+                prompt += "\n" + json.dumps(payload, ensure_ascii=False)
+            else:
+                # Legacy manga-image-translator format.
+                for i, query in enumerate(this_batch):
+                    prompt += f"\n<|{i+1}|>{query}"
             yield prompt.lstrip(), len(this_batch)
+
+    @staticmethod
+    def _parse_json_translations(response_text: str, batch_queries: List[str]) -> List[str]:
+        """Parse the fourth-step JSON contract and restore input ordering."""
+        cleaned = response_text.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+
+        data = json.loads(cleaned)
+        legacy_shape = isinstance(data, dict)
+        if legacy_shape:
+            # Accept the project's existing JSON shape as a compatibility path.
+            data = data.get("TextList", data.get("textList"))
+        if not isinstance(data, list):
+            raise ValueError("JSON translation response must be an array")
+
+        if legacy_shape:
+            raw_ids = [item.get("ID") for item in data if isinstance(item, dict)]
+            zero_based = set(range(len(batch_queries)))
+            one_based = set(range(1, len(batch_queries) + 1))
+            if set(raw_ids) == zero_based:
+                legacy_id_offset = 0
+                expected_ids = zero_based
+            elif set(raw_ids) == one_based:
+                legacy_id_offset = 1
+                expected_ids = one_based
+            else:
+                raise ValueError("Legacy JSON IDs must be a complete zero- or one-based sequence")
+        else:
+            legacy_id_offset = 1
+            expected_ids = set(range(1, len(batch_queries) + 1))
+        translations = [""] * len(batch_queries)
+        seen_ids = set()
+        for item in data:
+            if not isinstance(item, dict):
+                raise ValueError("JSON translation items must be objects")
+            item_id = item.get("id", item.get("ID"))
+            if isinstance(item_id, bool) or not isinstance(item_id, int) or item_id not in expected_ids:
+                raise ValueError(f"Invalid translation id: {item_id!r}")
+            if item_id in seen_ids:
+                raise ValueError(f"Duplicate translation id: {item_id}")
+            text = item.get("text")
+            if not isinstance(text, str):
+                raise ValueError(f"Translation text for id {item_id} must be a string")
+            if not legacy_shape and item.get("speaker") != "unknown":
+                raise ValueError(f"Translation speaker for id {item_id} must preserve the input value")
+            seen_ids.add(item_id)
+            translations[item_id - legacy_id_offset] = text.strip()
+
+        if seen_ids != expected_ids:
+            missing = sorted(expected_ids - seen_ids)
+            raise ValueError(f"Missing translation ids: {missing}")
+        return translations
 
     async def _translate(self, from_lang: str, to_lang: str, queries: List[str]) -> List[str]:
         """
@@ -224,9 +287,12 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
                     if orig_stage_flag:
                         self._is_stage2_translation = orig_stage_flag
 
-                fb_translations = [t.strip() for t in re.split(r'<\|\d+\|>', response_text_fb)]
-                if fb_translations and not fb_translations[0]:
-                    fb_translations = fb_translations[1:]
+                if self.json_mode:
+                    fb_translations = self._parse_json_translations(response_text_fb, batch_queries)
+                else:
+                    fb_translations = [t.strip() for t in re.split(r'<\|\d+\|>', response_text_fb)]
+                    if fb_translations and not fb_translations[0]:
+                        fb_translations = fb_translations[1:]
 
                 # 检查 fallback 模型是否提供了有效的翻译
                 if len(fb_translations) != len(batch_queries):
@@ -316,6 +382,19 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
 
                 # 解析响应
                 # Parse response
+                if self.json_mode:
+                    new_translations = self._parse_json_translations(response_text, batch_queries)
+                    # JSON mode has already validated one-to-one IDs and order.
+                    for i, translation in enumerate(new_translations):
+                        if batch_queries[i].strip() and not translation:
+                            raise ValueError(f"Empty translation for non-empty source at position {i + 1}")
+                    for i, translation in enumerate(new_translations):
+                        partial_results[i] = translation
+                    self.logger.info(
+                        f"JSON batch of size {len(batch_queries)} translated OK at attempt {attempt+1}/{max_attempts}."
+                    )
+                    return True, partial_results
+
                 new_translations = re.split(r'<\|\d+\|>', response_text)
                 merged_single_query = False
 
